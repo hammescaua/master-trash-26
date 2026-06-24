@@ -9,8 +9,9 @@ import tensorflow as tf
 from pathlib import Path
 
 CLASSES    = ["metal", "organic", "paper", "plastic"]
-MODEL_DIR  = Path("models/saved_model")
-OUTPUT_DIR = Path("models")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+MODEL_DIR    = PROJECT_ROOT / "models" / "saved_model"
+OUTPUT_DIR   = PROJECT_ROOT / "models"
 
 
 def export_tflite():

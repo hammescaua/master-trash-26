@@ -10,10 +10,11 @@ import shutil
 import random
 from pathlib import Path
 
-CLASSES   = ["paper", "plastic", "metal", "organic"]
-RAW_DIR   = Path("dataset/raw")
-SPLITS    = {"train": 0.70, "val": 0.15, "test": 0.15}
-SEED      = 42
+CLASSES      = ["paper", "plastic", "metal", "organic"]
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RAW_DIR      = PROJECT_ROOT / "dataset" / "raw"
+SPLITS       = {"train": 0.70, "val": 0.15, "test": 0.15}
+SEED         = 42
 
 
 def split_class(class_name: str):
@@ -36,7 +37,7 @@ def split_class(class_name: str):
     }
 
     for split_name, files in groups.items():
-        dest = Path("dataset") / split_name / class_name
+        dest = PROJECT_ROOT / "dataset" / split_name / class_name
         dest.mkdir(parents=True, exist_ok=True)
         for f in files:
             shutil.copy(f, dest / f.name)

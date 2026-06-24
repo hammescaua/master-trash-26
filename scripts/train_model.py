@@ -18,10 +18,11 @@ EPOCHS      = 20
 LR          = 1e-4
 CLASSES     = ["metal", "organic", "paper", "plastic"]
 
-TRAIN_DIR   = Path("dataset/train")
-VAL_DIR     = Path("dataset/val")
-SAVE_DIR    = Path("models/saved_model")
-PLOTS_DIR   = Path("plots")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TRAIN_DIR    = PROJECT_ROOT / "dataset" / "train"
+VAL_DIR      = PROJECT_ROOT / "dataset" / "val"
+SAVE_DIR     = PROJECT_ROOT / "models" / "saved_model"
+PLOTS_DIR    = PROJECT_ROOT / "plots"
 
 
 def build_data_augmentation():

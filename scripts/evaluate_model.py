@@ -16,9 +16,10 @@ CLASSES   = ["metal", "organic", "paper", "plastic"]
 IMAGE_SIZE = (224, 224)
 BATCH_SIZE = 32
 
-TEST_DIR   = Path("dataset/test")
-MODEL_DIR  = Path("models/saved_model")
-PLOTS_DIR  = Path("plots")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TEST_DIR     = PROJECT_ROOT / "dataset" / "test"
+MODEL_DIR    = PROJECT_ROOT / "models" / "saved_model"
+PLOTS_DIR    = PROJECT_ROOT / "plots"
 
 
 def main():
