@@ -13,22 +13,20 @@ import numpy as np
 import cv2
 from pathlib import Path
 from picamera2 import Picamera2
+from libcamera import controls
 from tflite_runtime.interpreter import Interpreter
 
-# Caminhos absolutos relativos ao projeto (funciona de qualquer diretório)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH   = PROJECT_ROOT / "models" / "model.tflite"
 LABELS_PATH  = PROJECT_ROOT / "models" / "labels.txt"
 
-PREVIEW_SIZE = (640, 480)   # Tamanho da janela de exibição
-MODEL_SIZE   = (224, 224)   # Tamanho de entrada do modelo
+PREVIEW_SIZE = (640, 480)
+MODEL_SIZE   = (224, 224)
 
-# Cores HUD (BGR)
 COLOR_OK   = (0, 255, 0)
 COLOR_WARN = (0, 100, 255)
 COLOR_INFO = (255, 255, 255)
 
-# Limiar de confiança para destaque visual
 CONFIDENCE_THRESHOLD = 0.70
 
 
@@ -44,27 +42,42 @@ def load_interpreter(model_path: Path) -> Interpreter:
 
 
 def predict(interpreter: Interpreter, image_rgb: np.ndarray):
-    """
-    Recebe imagem RGB já no tamanho do modelo (MODEL_SIZE).
-    Retorna (índice_top, confiança).
-    """
     input_details  = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
-
     img = image_rgb.astype(np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
-
     interpreter.set_tensor(input_details[0]["index"], img)
     interpreter.invoke()
-
     scores = interpreter.get_tensor(output_details[0]["index"])[0]
     top    = int(np.argmax(scores))
     return top, float(scores[top])
 
 
+def configure_camera(picam2: Picamera2) -> None:
+    config = picam2.create_preview_configuration(
+        main={"size": PREVIEW_SIZE, "format": "RGB888"},
+        lores={"size": MODEL_SIZE,  "format": "RGB888"},
+    )
+    picam2.configure(config)
+    picam2.start()
+
+    # Fix foco, cor e zoom — mesmas correções do collect_images
+    picam2.set_controls({
+        "AfMode":  controls.AfModeEnum.Continuous,
+        "AfSpeed": controls.AfSpeedEnum.Fast,
+        "AwbMode": controls.AwbModeEnum.Auto,
+    })
+    sensor_w, sensor_h = picam2.camera_properties["PixelArraySize"]
+    picam2.set_controls({"ScalerCrop": (0, 0, sensor_w, sensor_h)})
+
+    print("Aguardando câmera estabilizar (AF + AWB)...")
+    time.sleep(3)
+    print("Pronto.\n")
+
+
 def draw_hud(display, label, confidence, fps):
-    h = display.shape[0]
-    color = COLOR_OK if confidence >= CONFIDENCE_THRESHOLD else COLOR_WARN
+    h      = display.shape[0]
+    color  = COLOR_OK if confidence >= CONFIDENCE_THRESHOLD else COLOR_WARN
 
     cv2.putText(display, f"Prediction:  {label.upper()}",
                 (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.85, color, 2)
@@ -74,8 +87,8 @@ def draw_hud(display, label, confidence, fps):
                 (10, 105), cv2.FONT_HERSHEY_SIMPLEX, 0.75, COLOR_INFO, 2)
 
     if confidence < CONFIDENCE_THRESHOLD:
-        cv2.putText(display, "BAIXA CONFIANCA",
-                    (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.65, COLOR_WARN, 2)
+        cv2.putText(display, "BAIXA CONFIANCA — reposicione o objeto",
+                    (10, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLOR_WARN, 2)
 
 
 def main():
@@ -89,25 +102,16 @@ def main():
     interpreter = load_interpreter(MODEL_PATH)
     print(f"Modelo carregado. Classes: {labels}")
 
-    # Câmera em resolução de preview; captura já no tamanho do modelo
     picam2 = Picamera2()
-    config = picam2.create_preview_configuration(
-        main={"size": PREVIEW_SIZE, "format": "RGB888"},
-        lores={"size": MODEL_SIZE,  "format": "RGB888"},
-    )
-    picam2.configure(config)
-    picam2.start()
-    time.sleep(1)
+    configure_camera(picam2)
 
-    print("Pressione Q para sair.\n")
-
+    print("Pressione Q para sair.")
     prev_time = time.time()
 
     try:
         while True:
-            # Stream principal para exibição, lores para inferência
-            frame_display = picam2.capture_array("main")
-            frame_model   = picam2.capture_array("lores")
+            frame_display = picam2.capture_array("main")   # 640x480 para exibição
+            frame_model   = picam2.capture_array("lores")  # 224x224 para inferência
 
             top_index, confidence = predict(interpreter, frame_model)
             label = labels[top_index]
@@ -116,7 +120,6 @@ def main():
             fps       = 1.0 / max(now - prev_time, 1e-6)
             prev_time = now
 
-            # RGB -> BGR para OpenCV exibir cores corretas
             display = cv2.cvtColor(frame_display, cv2.COLOR_RGB2BGR)
             draw_hud(display, label, confidence, fps)
 
