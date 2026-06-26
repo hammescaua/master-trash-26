@@ -1,0 +1,18 @@
+# Dataset de treinamento
+dataset/
+
+# Drivers e instaladores
+arducam/
+
+# Ambiente virtual Python
+venv/
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
