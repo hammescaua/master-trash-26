@@ -19,8 +19,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODEL_PATH   = PROJECT_ROOT / "models" / "model.tflite"
 LABELS_PATH  = PROJECT_ROOT / "models" / "labels.txt"
 
-PREVIEW_SIZE = (640, 480)
-MODEL_SIZE   = (224, 224)
+SENSOR_SIZE  = (2328, 1748)   # modo binned IMX519 — sem crop, sem zoom
+MODEL_SIZE   = (224, 224)     # entrada do TFLite
+DISPLAY_SIZE = (640, 480)     # janela de exibição (resize em software)
 
 COLOR_OK   = (0, 255, 0)
 COLOR_WARN = (0, 100, 255)
@@ -55,25 +56,33 @@ def predict(interpreter: Interpreter, image_rgb: np.ndarray):
 def init_camera() -> Picamera2:
     picam2 = Picamera2()
 
-    sensor_w, sensor_h = picam2.camera_properties["PixelArraySize"]
-    print(f"[CAM] Sensor: {sensor_w}x{sensor_h}")
-
     config = picam2.create_preview_configuration(
-        main={"size": PREVIEW_SIZE, "format": "BGR888"},   # exibição
-        lores={"size": MODEL_SIZE,  "format": "RGB888"},   # inferência
-        controls={"FrameRate": 30},
+        main={"size": SENSOR_SIZE, "format": "XBGR8888"},
+        controls={"FrameRate": 15},
     )
     picam2.configure(config)
     picam2.start()
 
-    time.sleep(1)
-    picam2.set_controls({"ScalerCrop": [0, 0, sensor_w, sensor_h]})
-
     print("Aguardando AWB estabilizar...")
-    time.sleep(2)
+    time.sleep(3)
     print("Câmera pronta.\n")
 
     return picam2
+
+
+def capture_bgr_and_rgb(picam2: Picamera2):
+    """
+    Retorna (bgr_display, rgb_model) a partir de um único capture_array.
+    XBGR8888 → [:,:,:3] → BGR → resize separado para cada uso.
+    """
+    raw = picam2.capture_array()           # (1748, 2328, 4) XBGR
+    bgr = raw[:, :, :3]                    # descarta X → BGR
+
+    bgr_display = cv2.resize(bgr, DISPLAY_SIZE)
+    bgr_model   = cv2.resize(bgr, MODEL_SIZE)
+    rgb_model   = cv2.cvtColor(bgr_model, cv2.COLOR_BGR2RGB)
+
+    return bgr_display, rgb_model
 
 
 def draw_hud(display, label, confidence, fps):
@@ -94,9 +103,9 @@ def draw_hud(display, label, confidence, fps):
 
 def main():
     if not MODEL_PATH.exists() or not LABELS_PATH.exists():
-        print(f"Modelo ou labels nao encontrado.")
+        print("Modelo ou labels nao encontrado.")
         print(f"  Esperado: {MODEL_PATH}")
-        print(f"  Execute scripts/export_tflite.py primeiro.")
+        print("  Execute scripts/export_tflite.py primeiro.")
         return
 
     labels      = load_labels(LABELS_PATH)
@@ -105,24 +114,21 @@ def main():
 
     picam2    = init_camera()
     prev_time = time.time()
-
     print("Pressione Q para sair.")
 
     try:
         while True:
-            # main=BGR888 para exibição, lores=RGB888 para inferência
-            frame_bgr = picam2.capture_array("main")
-            frame_rgb = picam2.capture_array("lores")
+            bgr_display, rgb_model = capture_bgr_and_rgb(picam2)
 
-            top_index, confidence = predict(interpreter, frame_rgb)
+            top_index, confidence = predict(interpreter, rgb_model)
             label = labels[top_index]
 
             now       = time.time()
             fps       = 1.0 / max(now - prev_time, 1e-6)
             prev_time = now
 
-            draw_hud(frame_bgr, label, confidence, fps)
-            cv2.imshow("Master Trash - Teste em Tempo Real", frame_bgr)
+            draw_hud(bgr_display, label, confidence, fps)
+            cv2.imshow("Master Trash - Teste em Tempo Real", bgr_display)
 
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break

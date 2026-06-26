@@ -39,7 +39,10 @@ SELECT_MAP = {
     ord("o"): "organic",
 }
 
-PREVIEW_SIZE = (1280, 720)
+# Resolução binned do sensor (mesmo modo que rpicam-hello usa)
+# Usa sensor completo e reduz 2x — sem crop, sem zoom, cores corretas
+SENSOR_SIZE  = (2328, 1748)
+DISPLAY_SIZE = (1280, 720)   # tamanho da janela OpenCV (resize em software)
 
 COLOR_TITLE    = (0, 255, 255)
 COLOR_WHITE    = (255, 255, 255)
@@ -54,39 +57,34 @@ COLOR_WARN     = (0, 100, 255)
 
 def init_camera() -> Picamera2:
     """
-    Inicializa a Arducam IMX519 via Picamera2 de forma robusta.
-
-    Estratégia:
-    - Usa BGR888 diretamente → OpenCV exibe sem conversão de cor
-    - Aplica ScalerCrop em chamada separada após start() (evita race condition)
-    - Sleep escalonado: 1s geral + 1s extra para AWB estabilizar
+    Captura em XBGR8888 no modo binned 2328x1748 (igual ao rpicam-hello).
+    Isso evita crop do sensor (zoom) e entrega cores corretas.
     """
     picam2 = Picamera2()
 
-    # Imprime propriedades para debug caso algo ainda não bata
-    props = picam2.camera_properties
-    sensor_w, sensor_h = props["PixelArraySize"]
-    print(f"[CAM] Sensor: {sensor_w}x{sensor_h}")
-
     config = picam2.create_preview_configuration(
-        main={"size": PREVIEW_SIZE, "format": "BGR888"},  # BGR nativo → sem conversão
-        controls={"FrameRate": 30},
+        main={"size": SENSOR_SIZE, "format": "XBGR8888"},
+        controls={"FrameRate": 15},
     )
     picam2.configure(config)
     picam2.start()
 
-    # Pausa 1: sensor ligar
-    time.sleep(1)
-
-    # ScalerCrop em chamada isolada → usa sensor completo sem crop
-    picam2.set_controls({"ScalerCrop": [0, 0, sensor_w, sensor_h]})
-
-    # Pausa 2: AWB estabilizar (essencial para cor correta)
     print("Aguardando AWB estabilizar...")
-    time.sleep(2)
+    time.sleep(3)
     print("Câmera pronta.\n")
 
-    return picam2, sensor_w, sensor_h
+    return picam2
+
+
+def capture_frame(picam2: Picamera2):
+    """
+    Retorna frame BGR pronto para o OpenCV.
+    XBGR8888 tem 4 canais: X, B, G, R → descartamos o X com [:, :, :3].
+    Resultado: BGR sem nenhum cvtColor.
+    """
+    frame = picam2.capture_array()   # shape (1748, 2328, 4) — XBGR8888
+    bgr   = frame[:, :, :3]          # descarta canal X → BGR (1748, 2328, 3)
+    return bgr
 
 
 # =============================================================================
@@ -100,12 +98,12 @@ def count_existing(class_name: str) -> int:
     return len(list(folder.glob("*.jpg")))
 
 
-def save_image(frame, class_name: str) -> str:
+def save_image(frame_bgr, class_name: str) -> str:
     folder = BASE_DIR / class_name
     folder.mkdir(parents=True, exist_ok=True)
     count    = count_existing(class_name) + 1
     filename = folder / f"{class_name}_{count:04d}.jpg"
-    cv2.imwrite(str(filename), frame)
+    cv2.imwrite(str(filename), frame_bgr)  # salva em resolução total (2328x1748)
     return str(filename)
 
 
@@ -150,7 +148,7 @@ def main():
     print("1/P=PAPER  2/L=PLASTIC  3/M=METAL  4/O=ORGANIC")
     print("SPACE=SALVAR  Q=SAIR\n")
 
-    picam2, _, _ = init_camera()
+    picam2 = init_camera()
 
     selected_class = None
     saved_message  = ""
@@ -158,9 +156,10 @@ def main():
 
     try:
         while True:
-            # BGR888 → OpenCV usa direto, sem conversão
-            frame   = picam2.capture_array()
-            display = frame.copy()
+            frame_bgr = capture_frame(picam2)
+
+            # Reduz para exibição (só na tela, arquivo salvo em alta resolução)
+            display = cv2.resize(frame_bgr, DISPLAY_SIZE)
 
             counts = {name: count_existing(name) for name in CLASSES}
             draw_hud(display, selected_class, counts, saved_message, message_timer)
@@ -179,7 +178,7 @@ def main():
                 if selected_class is None:
                     print("[AVISO] Selecione uma classe antes de salvar.")
                 else:
-                    path          = save_image(frame, selected_class)
+                    path          = save_image(frame_bgr, selected_class)
                     saved_message = f"Salvo: {os.path.basename(path)}"
                     message_timer = 80
                     print(f"[OK] {path}")
